@@ -1,31 +1,122 @@
 # Some general utils code, plotting loss values, loss computation etc.
 
 import numpy as np
+import matplotlib.pyplot as plt 
 
-def mse_loss_and_grads(model, x, y):
+def mse_loss(y, y_pred):
     """
-        Compute the MSE loss and gradients for a model
-        x shape: (B, In)
-        y shape: (B, Out=1)
+        Compute MSE loss for given pair of y and y_pred
+        Expected numpy array for both
     """
-    y_pred = model.forward(x)
+    B = y.shape[0]
+    loss = np.sum((y - y_pred) ** 2) / (2 * B)
+    dy_pred = -(y - y_pred) / B
+    return loss, dy_pred
 
-    mse_loss = np.sum((y - y_pred)**2) / (2 * x.shape[0])
+def plot_loss(train_loss_values, val_loss_values):
+    plt.plot(range(len(train_loss_values)), train_loss_values, label="Train Loss") 
+    plt.plot(range(len(val_loss_values)), val_loss_values, label="Val Loss") 
 
-    ## Steps
-    ## loss = np.sum((y-y_pred)**2) / 2B
-    ## y_pred = hidden * W  + b # hidden -> (B, H), W -> (H, O), b -> (O)
-    
-    dy_pred = -(y - y_pred) / (x.shape[0]) # (B, O)
-    db = dy_pred.sum(axis=0) # (O)
-    dW = hidden * dy_pred
+    # plt.scatter(range(len(loss_values)), loss_values, c='red', s=20)
 
-def get_loss_and_grads(model, x, y, loss_fn):
+    plt.title('Loss Curve')
+    plt.xlabel('Epochs')
+    plt.ylabel('Loss')
+    plt.legend()
+    plt.show()
+
+def train_one_epoch(model, xb, yb, optim, loss_fn):
     """
-        Get loss and gradients for a MLP model defined previously
+        Function to see what happens in a single epoch of training
+        We take the model, xb and yb are the mini batches, the optim object and the loss_fn
     """
-    y_pred = model.forward(x)
+    model.reset_grads_to_zero()
+    yb_pred = model.forward(xb) # forward
+    loss, dyb_pred = loss_fn(yb, yb_pred) # compute loss and get the dy_pred
+    model.backward(xb, dyb_pred) # compute the gradients
+    params, grads = model.get_params(), model.get_grads() # flatten the params and grads
+    updated_params = optim.update(params, grads) # update as per our optim
+    model.update_params(updated_params) # update params
+    return loss
 
-    loss = loss_fn(y, y_pred)
+def create_mini_batches(x_train, y_train, batch_size):
+    """
+    Create mini-batches from training data
 
-    dy_pred = 
+    Parameters:
+    -----------
+    x_train : numpy array of shape (n_samples, input_dim)
+        Training features
+    y_train : numpy array of shape (n_samples, output_dim)
+        Training labels
+    batch_size : int
+        Size of each mini-batch
+
+    Returns:
+    --------
+    list of tuples
+        Each tuple contains (x_batch, y_batch) for one mini-batch
+    """
+    # Get the number of training examples
+    n_samples = x_train.shape[0]
+
+    # Shuffle the training data
+    indices = np.random.permutation(n_samples)
+    x_shuffled = x_train[indices]
+    y_shuffled = y_train[indices]
+
+    # Create mini-batches
+    mini_batches = []
+
+    # Complete mini-batches
+    num_complete_batches = n_samples // batch_size
+    for i in range(num_complete_batches):
+        start_idx = i * batch_size
+        end_idx = (i + 1) * batch_size
+
+        x_batch = x_shuffled[start_idx:end_idx].copy()  # Using copy to avoid memory sharing
+        y_batch = y_shuffled[start_idx:end_idx].copy()
+
+        mini_batches.append((x_batch, y_batch))
+
+    # Handle the remaining examples (if any)
+    if n_samples % batch_size != 0:
+        start_idx = num_complete_batches * batch_size
+
+        x_batch = x_shuffled[start_idx:].copy()
+        y_batch = y_shuffled[start_idx:].copy()
+
+        mini_batches.append((x_batch, y_batch))
+
+    return mini_batches
+
+def train(model, x_train, y_train, x_val, y_val, optim, loss_fn, n_epochs, batch_size):
+    """
+        Unified function for training
+    """
+    n_samples = x_train.shape[0]
+    train_losses, val_losses = [], []
+
+    for epoch in range(n_epochs):
+        # Create mini-batches
+        mini_batches = create_mini_batches(x_train, y_train, batch_size)
+
+        epoch_loss = 0
+
+        # Train on mini-batches
+        for x_batch, y_batch in mini_batches:
+            batch_loss = train_one_epoch(model, x_batch, y_batch, optim, loss_fn)
+            epoch_loss += batch_loss * len(x_batch) / n_samples
+
+        train_losses.append(epoch_loss)
+
+        # Compute val loss
+        y_val_pred = model.forward(x_val)
+        val_loss, _ = loss_fn(y_val, y_val_pred)
+        val_losses.append(val_loss)
+
+        # Print progress
+        if ((epoch + 1) % 10 == 0) or (epoch == n_epochs - 1):
+            print(f"Epoch {epoch + 1}/{n_epochs}, Train Loss: {epoch_loss:.6f}, Val Loss: {val_loss:.6f}")
+
+    return train_losses, val_losses
